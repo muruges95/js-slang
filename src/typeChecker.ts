@@ -25,7 +25,7 @@ export function typeCheck(program: es.Program | undefined): void {
 }
 
 // Type Definitions
-// An environment maps variables (which are expressions) to types. Do not confuse with a 
+// An environment maps variables (which are expressions) to types. Do not confuse with a
 // substitution which maps type variables to types
 interface Env {
   [name: string]: TYPE
@@ -40,7 +40,7 @@ interface Ctx {
 }
 
 // a map of type variable names to types assigned to them
-// A substitution maps type variables to types while an environment maps variables (which are 
+// A substitution maps type variables to types while an environment maps variables (which are
 // expressions) to types
 interface Subsitution {
   [key: string]: TYPE
@@ -125,12 +125,12 @@ function applySubstToType(subst: Subsitution, type: TYPE): TYPE {
 }
 
 /**
- * Replace type variables in a type that are present in a given substitution 
+ * Replace type variables in a type that are present in a given substitution
  * and return the type with those variables with their substituted values
- * e.g. applying substitution of {"a": Bool, "b": Int} to type (a -> b) will give 
+ * e.g. applying substitution of {"a": Bool, "b": Int} to type (a -> b) will give
  * the type: Bool -> Int
- * @param subst 
- * @param types 
+ * @param subst
+ * @param types
  */
 function applySubstToTypes(subst: Subsitution, types: TYPE[]): TYPE[] {
   return types.map(type => applySubstToType(subst, type))
@@ -139,8 +139,8 @@ function applySubstToTypes(subst: Subsitution, types: TYPE[]): TYPE[] {
 /**
  * Applies the first substitution to the types of the second one and then
  * combines the result with the first substitution
- * @param s1 
- * @param s2 
+ * @param s1
+ * @param s2
  */
 function composeSubsitutions(s1: Subsitution, s2: Subsitution): Subsitution {
   const composedSubst: Subsitution = {}
@@ -199,18 +199,21 @@ type TYPE = NAMED | VAR | FUNCTION
 function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
   const env = ctx.env
   switch (node.type) {
-    case 'BinaryExpression':  {
+    case 'BinaryExpression': {
       const [inferredLeft, leftSubst] = infer(node.left, ctx)
       const [inferredRight, rightSubst] = infer(node.right, ctx)
       let composedSubst = composeSubsitutions(leftSubst, rightSubst)
 
-      const funcType = env[node.operator] as FUNCTION;
-      const newType = newTypeVar(ctx);
-      const subst1 = unify({ 
-        nodeType: 'Function', 
-        fromTypes: [inferredLeft, inferredRight], 
-        toType: newType}, 
-      funcType)
+      const funcType = env[node.operator] as FUNCTION
+      const newType = newTypeVar(ctx)
+      const subst1 = unify(
+        {
+          nodeType: 'Function',
+          fromTypes: [inferredLeft, inferredRight],
+          toType: newType
+        },
+        funcType
+      )
 
       composedSubst = composeSubsitutions(composedSubst, subst1)
       const inferredReturnType = applySubstToType(composedSubst, funcType.toType)
@@ -347,21 +350,21 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
   }
 }
 
-//=======================================
+// =======================================
 // Private Helper Parsing Functions
-//=======================================
+// =======================================
 
 function tNamedBool(): NAMED {
   return {
-      nodeType: "Named",
-      name: 'boolean'
-  };
+    nodeType: 'Named',
+    name: 'boolean'
+  }
 }
 
 function tNamedNumber(): NAMED {
   return {
-    nodeType: "Named",
-    name: "number"
+    nodeType: 'Named',
+    name: 'number'
   }
 }
 
@@ -369,20 +372,20 @@ function tFunc(...types: TYPE[]): FUNCTION {
   const fromTypes = types.slice(0, -1)
   const toType = types.slice(-1)[0]
   return {
-      nodeType: 'Function',
-      fromTypes: fromTypes,
-      toType: toType
-  };
+    nodeType: 'Function',
+    fromTypes,
+    toType
+  }
 }
 
 const initialEnv = {
-    "true": tNamedBool(),
-    "false": tNamedBool(),
-    "!": tFunc(tNamedBool(), tNamedBool()),
-    "&&": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-    "||": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-    // NOTE for now just handle for Number === Number
-    "===": tFunc(tNamedNumber(), tNamedNumber(), tNamedBool()),
-    // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-    "+": tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
-};
+  // true: tNamedBool(),
+  // false: tNamedBool(),
+  '!': tFunc(tNamedBool(), tNamedBool()),
+  '&&': tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
+  '||': tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
+  // NOTE for now just handle for Number === Number
+  '===': tFunc(tNamedNumber(), tNamedNumber(), tNamedBool()),
+  // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
+  '+': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
+}
