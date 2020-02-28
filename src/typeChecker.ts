@@ -12,12 +12,12 @@ export function typeCheck(program: es.Program | undefined): void {
   }
   const ctx: Ctx = { next: 0, env: initialEnv }
   try {
-    program.body.forEach(node => {
-      infer(node, ctx)
-      // if (1 + 1 === 0) {
-      //   infer(node, ctx)
-      // }
-    })
+    if (program.body.length < 10) {
+      program.body.forEach(node => {
+        infer(node, ctx)
+        // console.log(ctx.env)
+      })
+    }
   } catch (e) {
     console.log(e)
     throw e
@@ -214,8 +214,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
         },
         funcType
       )
-
-      composedSubst = composeSubsitutions(composedSubst, subst1)
+      composedSubst = composeSubsitutions(subst1, composedSubst)
       const inferredReturnType = applySubstToType(composedSubst, funcType.toType)
       return [inferredReturnType, composedSubst]
     }
@@ -288,12 +287,16 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       return [{ nodeType: 'Named', name: 'undefined' }, subst5]
     }
     case 'ArrowFunctionExpression': {
-      const newCtx = cloneCtx(ctx) // create new scope
       const newTypes: TYPE[] = []
-      node.params.forEach((param: es.Identifier) => {
+      node.params.forEach(() => {
         const newType = newTypeVar(ctx)
-        addToCtx(newCtx, param.name, newType)
         newTypes.push(newType)
+      })
+      // clone scope only after we have accounted for all the new type variables to be created
+      const newCtx = cloneCtx(ctx)
+      node.params.forEach((param: es.Identifier, index) => {
+        const newType = newTypes[index]
+        addToCtx(newCtx, param.name, newType)
       })
       const [bodyType, subst] = infer(node.body, newCtx)
       const inferredType: FUNCTION = {
@@ -312,9 +315,55 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       if (!init || id.type !== 'Identifier') {
         throw Error('Either no initialization or not an identifier on LHS')
       }
-      const [inferredInitType, subst] = infer(init, ctx)
-      addToCtx(ctx, id.name, inferredInitType)
-      return [{ nodeType: 'Named', name: 'undefined' }, subst]
+      // get a reference to the type variable representing our new variable
+      // this is so we know of any references made to our variable in the init
+      // (i.e. perhaps in some kind of recursive definition)
+      const newType = newTypeVar(ctx)
+      addToCtx(ctx, id.name, newType)
+      const [inferredInitType, subst1] = infer(init, ctx)
+      // In case we made a reference to our declared variable in our init, need to type
+      // check the usage to see if the inferred init type is compatible with the inferred type of our
+      // type variable based on the usage inside init
+      const subst2 = unify(inferredInitType, applySubstToType(subst1, newType))
+      const composedSubst = composeSubsitutions(subst1, subst2)
+      addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredInitType))
+      return [{ nodeType: 'Named', name: 'undefined' }, composedSubst]
+    }
+    case 'FunctionDeclaration': {
+      const id = node.id
+      if (id === null) {
+        throw Error('No identifier for function declaration')
+      }
+      const paramTypes: TYPE[] = []
+      node.params.forEach(() => {
+        const newType = newTypeVar(ctx)
+        paramTypes.push(newType)
+      })
+      // similar to variable declaration, catch possible type errors such as wrongly using identifier 
+      // not as a function. for that we need to create a type variable and introduce it into the context
+      const functionType: FUNCTION = {
+        nodeType: "Function",
+        fromTypes: paramTypes,
+        toType: newTypeVar(ctx)
+      }
+      addToCtx(ctx, id.name, functionType)
+      // clone scope only after we have accounted for all the new type variables to be created
+      const newCtx = cloneCtx(ctx)
+      node.params.forEach((param: es.Identifier, index) => {
+        const newType = paramTypes[index]
+        addToCtx(newCtx, param.name, newType)
+      })
+      const [bodyType, subst1] = infer(node.body, newCtx)
+      // unify, for the same reason as in variable declaration
+      const inferredType: FUNCTION = {
+        nodeType: 'Function',
+        fromTypes: applySubstToTypes(subst1, paramTypes),
+        toType: bodyType
+      }
+      const subst2 = unify(inferredType, applySubstToType(subst1, functionType))
+      const composedSubst = composeSubsitutions(subst1, subst2)
+      addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredType))
+      return [{ nodeType: 'Named', name: 'undefined' }, composedSubst]
     }
     case 'CallExpression': {
       const [funcType, subst1] = infer(node.callee, ctx)
@@ -330,7 +379,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       const newType = newTypeVar(ctx)
       const subst3 = composeSubsitutions(subst1, subst2)
       // Check that our supposed function is an actual function and unify with literal fn type
-      const subst4 = unify({ nodeType: 'Function', fromTypes: argTypes, toType: newType }, funcType)
+      const subst4 = unify(funcType, { nodeType: 'Function', fromTypes: argTypes, toType: newType })
       const funcType1 = applySubstToType(subst4, funcType) as FUNCTION
       // consolidate all substitutions so far
       const subst5 = composeSubsitutions(subst3, subst4)
@@ -387,5 +436,8 @@ const initialEnv = {
   // NOTE for now just handle for Number === Number
   '===': tFunc(tNamedNumber(), tNamedNumber(), tNamedBool()),
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-  '+': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
+  '+': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
+  '-': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
+  '*': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
+  // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
 }
