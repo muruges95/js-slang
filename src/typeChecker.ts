@@ -339,10 +339,10 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
         const newType = newTypeVar(ctx)
         paramTypes.push(newType)
       })
-      // similar to variable declaration, catch possible type errors such as wrongly using identifier 
+      // similar to variable declaration, catch possible type errors such as wrongly using identifier
       // not as a function. for that we need to create a type variable and introduce it into the context
       const functionType: FUNCTION = {
-        nodeType: "Function",
+        nodeType: 'Function',
         fromTypes: paramTypes,
         toType: newTypeVar(ctx)
       }
@@ -438,6 +438,6 @@ const initialEnv = {
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
   '+': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
   '-': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
-  '*': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
+  '*': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
   // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
 }
