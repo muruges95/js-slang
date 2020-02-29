@@ -205,11 +205,14 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       const [inferredType, subst1] = infer(node.argument, ctx)
       const funcType = env[node.operator] as FUNCTION
       const newType = newTypeVar(ctx)
-      const subst2 = unify({
-        nodeType: 'Function',
-        fromTypes: [inferredType],
-        toType: newType
-      }, funcType)
+      const subst2 = unify(
+        {
+          nodeType: 'Function',
+          fromTypes: [inferredType],
+          toType: newType
+        },
+        funcType
+      )
       const composedSubst = composeSubsitutions(subst1, subst2)
       return [applySubstToType(composedSubst, funcType.toType), composedSubst]
     }
