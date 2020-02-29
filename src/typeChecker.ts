@@ -273,8 +273,6 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       ) {
         return [tNamed(typeOfLiteral), {}]
       }
-      console.log('Encountered type:')
-      console.log(literalVal)
       throw Error('Unexpected literal type')
     }
     case 'Identifier': {
