@@ -18,6 +18,7 @@ export function typeCheck(program: es.Program | undefined): void {
       program.body.forEach(node => {
         infer(node, ctx)
       })
+      // console.log(ctx.env)
     }
   } catch (e) {
     console.log(e)
@@ -200,6 +201,19 @@ type TYPE = NAMED | VAR | FUNCTION
 function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
   const env = ctx.env
   switch (node.type) {
+    case 'UnaryExpression': {
+      const [inferredType, subst1] = infer(node.argument, ctx)
+      const funcType = env[node.operator] as FUNCTION
+      const newType = newTypeVar(ctx)
+      const subst2 = unify({
+        nodeType: 'Function',
+        fromTypes: [inferredType],
+        toType: newType
+      }, funcType)
+      const composedSubst = composeSubsitutions(subst1, subst2)
+      return [applySubstToType(composedSubst, funcType.toType), composedSubst]
+    }
+    case 'LogicalExpression': // both cases are the same
     case 'BinaryExpression': {
       const [inferredLeft, leftSubst] = infer(node.left, ctx)
       const [inferredRight, rightSubst] = infer(node.right, ctx)
