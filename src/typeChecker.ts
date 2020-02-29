@@ -1,6 +1,6 @@
 import * as es from 'estree'
 // tslint:disable:no-console
-
+// tslint:disable: object-literal-key-quotes
 /**
  * An additional layer of typechecking to be done right after parsing.
  * @param program Parsed Program
@@ -12,10 +12,11 @@ export function typeCheck(program: es.Program | undefined): void {
   }
   const ctx: Ctx = { next: 0, env: initialEnv }
   try {
+    // dont run type check for predefined functions as they include constructs we can't handle
+    // like lists etc.
     if (program.body.length < 10) {
       program.body.forEach(node => {
         infer(node, ctx)
-        // console.log(ctx.env)
       })
     }
   } catch (e) {
@@ -220,13 +221,13 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
     }
     case 'ExpressionStatement': {
       const inferred = infer(node.expression, ctx)
-      return [{ nodeType: 'Named', name: 'undefined' }, inferred[1]]
+      return [tNamedUndef, inferred[1]]
     }
     case 'ReturnStatement': {
       if (node.argument === undefined) {
-        return [{ nodeType: 'Named', name: 'undefined' }, {}]
+        return [tNamedUndef, {}]
       } else if (node.argument === null) {
-        return [{ nodeType: 'Named', name: 'null' }, {}]
+        return [tNamedNull, {}]
       }
       return infer(node.argument, ctx)
     }
@@ -241,20 +242,22 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
           return [inferredType, composedSubst]
         }
       }
-      return [{ nodeType: 'Named', name: 'undefined' }, composedSubst]
+      return [tNamedUndef, composedSubst]
     }
     case 'Literal': {
       const literalVal = node.value
       const typeOfLiteral = typeof literalVal
       if (literalVal === null) {
-        return [{ nodeType: 'Named', name: 'null' }, {}]
+        return [tNamedNull, {}]
       } else if (
         typeOfLiteral === 'boolean' ||
         typeOfLiteral === 'string' ||
         typeOfLiteral === 'number'
       ) {
-        return [{ nodeType: 'Named', name: typeOfLiteral }, {}]
+        return [tNamed(typeOfLiteral), {}]
       }
+      console.log('Encountered type:')
+      console.log(literalVal)
       throw Error('Unexpected literal type')
     }
     case 'Identifier': {
@@ -267,13 +270,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
     case 'IfStatement': {
       // type check test
       const [testType, subst1] = infer(node.test, ctx)
-      const subst2 = unify(
-        {
-          nodeType: 'Named',
-          name: 'boolean'
-        },
-        testType
-      )
+      const subst2 = unify(tNamedBool, testType)
       const subst3 = composeSubsitutions(subst1, subst2)
       applySubstToCtx(subst3, ctx)
       const [, subst4] = infer(node.consequent, ctx)
@@ -282,9 +279,9 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       if (node.alternate) {
         // Have to decide whether we want both branches to unify. Till then return in if wont work
         const [, subst6] = infer(node.alternate, ctx)
-        return [{ nodeType: 'Named', name: 'undefined' }, composeSubsitutions(subst5, subst6)]
+        return [tNamedUndef, composeSubsitutions(subst5, subst6)]
       }
-      return [{ nodeType: 'Named', name: 'undefined' }, subst5]
+      return [tNamedUndef, subst5]
     }
     case 'ArrowFunctionExpression': {
       const newTypes: TYPE[] = []
@@ -327,7 +324,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       const subst2 = unify(inferredInitType, applySubstToType(subst1, newType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredInitType))
-      return [{ nodeType: 'Named', name: 'undefined' }, composedSubst]
+      return [tNamedUndef, composedSubst]
     }
     case 'FunctionDeclaration': {
       const id = node.id
@@ -363,7 +360,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       const subst2 = unify(inferredType, applySubstToType(subst1, functionType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredType))
-      return [{ nodeType: 'Named', name: 'undefined' }, composedSubst]
+      return [tNamedUndef, composedSubst]
     }
     case 'CallExpression': {
       const [funcType, subst1] = infer(node.callee, ctx)
@@ -395,7 +392,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       return [inferredReturnType, finalSubst]
     }
     default:
-      return [{ nodeType: 'Named', name: 'undefined' }, {}]
+      return [tNamedUndef, {}]
   }
 }
 
@@ -403,19 +400,18 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
 // Private Helper Parsing Functions
 // =======================================
 
-function tNamedBool(): NAMED {
+function tNamed(name: NAMED_TYPE): NAMED {
   return {
     nodeType: 'Named',
-    name: 'boolean'
+    name
   }
 }
 
-function tNamedNumber(): NAMED {
-  return {
-    nodeType: 'Named',
-    name: 'number'
-  }
-}
+const tNamedBool = tNamed('boolean')
+const tNamedNumber = tNamed('number')
+const tNamedNull = tNamed('null')
+// const tNamedString = tNamed('string')
+const tNamedUndef = tNamed('undefined')
 
 function tFunc(...types: TYPE[]): FUNCTION {
   const fromTypes = types.slice(0, -1)
@@ -428,16 +424,17 @@ function tFunc(...types: TYPE[]): FUNCTION {
 }
 
 const initialEnv = {
-  // true: tNamedBool(),
-  // false: tNamedBool(),
-  '!': tFunc(tNamedBool(), tNamedBool()),
-  '&&': tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-  '||': tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
+  Infinity: tNamedNumber,
+  NaN: tNamedNumber,
+  undefined: tNamedUndef,
+  '!': tFunc(tNamedBool, tNamedBool),
+  '&&': tFunc(tNamedBool, tNamedBool, tNamedBool),
+  '||': tFunc(tNamedBool, tNamedBool, tNamedBool),
   // NOTE for now just handle for Number === Number
-  '===': tFunc(tNamedNumber(), tNamedNumber(), tNamedBool()),
+  '===': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-  '+': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
-  '-': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber()),
-  '*': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
+  '+': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
+  '-': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
+  '*': tFunc(tNamedNumber, tNamedNumber, tNamedNumber)
   // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
 }

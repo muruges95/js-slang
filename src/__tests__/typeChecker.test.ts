@@ -27,6 +27,29 @@ describe('binary expressions', () => {
     expect(() => typeCheck(program)).not.toThrowError()
   })
 
+  it('errors when having a string arg for function expecting a number', () => {
+    const context = createContext(1)
+    const code = 'function f(x) { return x + 2; } f("test");'
+    const program = parse(code, context)
+    expect(() => typeCheck(program)).toThrowError()
+  })
+
+  it('errors when having a function called with wrong number of args', () => {
+    const context = createContext(1)
+    const code = 'function f(x) { return x; } f("test", 1);'
+    const program = parse(code, context)
+    expect(() => typeCheck(program)).toThrowError()
+  })
+
+  it('errors when using a variable recursively wrongly', () => {
+    const context = createContext(1)
+    const code = 'const f = (x) => { return f + 1; };'
+    const program = parse(code, context)
+    expect(() => typeCheck(program)).toThrowError()
+  })
+
+  it()
+
   // NOTE currently fails, can fix once we introduce polymorphic types
   // it('no errors when comparing string with string', () => {
   //     const context = createContext(1)
