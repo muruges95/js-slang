@@ -282,7 +282,6 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       }
       throw Error('Undefined identifier')
     }
-    case 'ConditionalExpression': // both cases are the same 
     case 'IfStatement': {
       // type check test
       const [testType, subst1] = infer(node.test, ctx)
@@ -448,7 +447,6 @@ const initialEnv = {
   '||': tFunc(tNamedBool, tNamedBool, tNamedBool),
   // NOTE for now just handle for Number === Number
   '===': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
-  '!==': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
   '+': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
   '-': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
