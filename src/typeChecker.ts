@@ -6,20 +6,21 @@ import * as es from 'estree'
  * @param program Parsed Program
  * @param context Additional context such as the week of our source program, comments etc.
  */
-export function typeCheck(program: es.Program | undefined): void {
+export function typeCheck(program: es.Program | undefined): object[] {
   if (program === undefined || program.body[0] === undefined) {
-    return
+    return []
   }
   const ctx: Ctx = { next: 0, env: initialEnv }
   try {
     // dont run type check for predefined functions as they include constructs we can't handle
     // like lists etc.
+    const root: object = {}
     if (program.body.length < 10) {
-      program.body.forEach(node => {
-        infer(node, ctx)
+      program.body.forEach((node, idx) => {
+        infer(node, ctx, root, idx.toString())
       })
-      // console.log(ctx.env)
     }
+    return Object.keys(root).map(key => root[key])
   } catch (e) {
     console.log(e)
     throw e
@@ -197,12 +198,40 @@ interface FUNCTION {
 }
 type TYPE = NAMED | VAR | FUNCTION
 
+function saveTypeAndReturn(
+  inferred: [TYPE, Subsitution],
+  copiedNode: object
+): [TYPE, Subsitution] {
+  // TODO handle kind field
+  const type = inferred[0]
+  switch (type.nodeType) {
+    case 'Named':
+      copiedNode = { ...copiedNode, inferredType: { name: type.name, kind: 'primitive' } }
+      break
+    case 'Function':
+      throw Error('saving types for functions not implemented yet')
+    case 'Var':
+      throw Error('there should not be Var node types in the AST')
+  }
+  return inferred
+}
+
 // tslint:disable-next-line: cyclomatic-complexity
-function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
+function infer(
+  node: es.Node,
+  ctx: Ctx,
+  prevCopiedNode?: object,
+  key?: string
+): [TYPE, Subsitution] {
   const env = ctx.env
+  const copiedNode = { ...node }
+  delete copiedNode.loc // loc is not part of source type inference spec
+  if (prevCopiedNode && key) {
+    prevCopiedNode[key] = copiedNode
+  }
   switch (node.type) {
     case 'UnaryExpression': {
-      const [inferredType, subst1] = infer(node.argument, ctx)
+      const [inferredType, subst1] = infer(node.argument, ctx, copiedNode, 'argument')
       const funcType = env[node.operator] as FUNCTION
       const newType = newTypeVar(ctx)
       const subst2 = unify(
@@ -214,12 +243,15 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
         funcType
       )
       const composedSubst = composeSubsitutions(subst1, subst2)
-      return [applySubstToType(composedSubst, funcType.toType), composedSubst]
+      return saveTypeAndReturn(
+        [applySubstToType(composedSubst, funcType.toType), composedSubst],
+        copiedNode
+      )
     }
     case 'LogicalExpression': // both cases are the same
     case 'BinaryExpression': {
-      const [inferredLeft, leftSubst] = infer(node.left, ctx)
-      const [inferredRight, rightSubst] = infer(node.right, ctx)
+      const [inferredLeft, leftSubst] = infer(node.left, ctx, copiedNode, 'left')
+      const [inferredRight, rightSubst] = infer(node.right, ctx, copiedNode, 'right')
       let composedSubst = composeSubsitutions(leftSubst, rightSubst)
 
       const funcType = env[node.operator] as FUNCTION
@@ -234,70 +266,71 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       )
       composedSubst = composeSubsitutions(subst1, composedSubst)
       const inferredReturnType = applySubstToType(composedSubst, funcType.toType)
-      return [inferredReturnType, composedSubst]
+      return saveTypeAndReturn([inferredReturnType, composedSubst], copiedNode)
     }
     case 'ExpressionStatement': {
-      const inferred = infer(node.expression, ctx)
-      return [tNamedUndef, inferred[1]]
+      const inferred = infer(node.expression, ctx, copiedNode, 'expression')
+      return saveTypeAndReturn([tNamedUndef, inferred[1]], copiedNode)
     }
     case 'ReturnStatement': {
       if (node.argument === undefined) {
-        return [tNamedUndef, {}]
+        return saveTypeAndReturn([tNamedUndef, {}], copiedNode)
       } else if (node.argument === null) {
-        return [tNamedNull, {}]
+        return saveTypeAndReturn([tNamedNull, {}], copiedNode)
       }
-      return infer(node.argument, ctx)
+      return saveTypeAndReturn(infer(node.argument, ctx, copiedNode, 'argument'), copiedNode)
     }
     case 'BlockStatement': {
       const newCtx = cloneCtx(ctx) // create new scope
       let composedSubst: Subsitution = {}
       for (const currentNode of node.body) {
+        // block statement, do not need to generate intermediate annotated AST
         const [inferredType, subst] = infer(currentNode, newCtx)
         composedSubst = composeSubsitutions(composedSubst, subst)
         applySubstToCtx(composedSubst, newCtx)
         if (currentNode.type === 'ReturnStatement') {
-          return [inferredType, composedSubst]
+          return saveTypeAndReturn([inferredType, composedSubst], copiedNode)
         }
       }
-      return [tNamedUndef, composedSubst]
+      return saveTypeAndReturn([tNamedUndef, composedSubst], copiedNode)
     }
     case 'Literal': {
       const literalVal = node.value
       const typeOfLiteral = typeof literalVal
       if (literalVal === null) {
-        return [tNamedNull, {}]
+        return saveTypeAndReturn([tNamedNull, {}], copiedNode)
       } else if (
         typeOfLiteral === 'boolean' ||
         typeOfLiteral === 'string' ||
         typeOfLiteral === 'number'
       ) {
-        return [tNamed(typeOfLiteral), {}]
+        return saveTypeAndReturn([tNamed(typeOfLiteral), {}], copiedNode)
       }
       throw Error('Unexpected literal type')
     }
     case 'Identifier': {
       const identifierName = node.name
       if (env[identifierName]) {
-        return [env[identifierName], {}]
+        return saveTypeAndReturn([env[identifierName], {}], copiedNode)
       }
       throw Error(`Undefined identifier: ${identifierName}`)
     }
     case 'ConditionalExpression': // both cases are the same
     case 'IfStatement': {
       // type check test
-      const [testType, subst1] = infer(node.test, ctx)
+      const [testType, subst1] = infer(node.test, ctx, copiedNode, 'test')
       const subst2 = unify(tNamedBool, testType)
       const subst3 = composeSubsitutions(subst1, subst2)
       applySubstToCtx(subst3, ctx)
-      const [, subst4] = infer(node.consequent, ctx)
+      const [, subst4] = infer(node.consequent, ctx, copiedNode, 'consequent')
       const subst5 = composeSubsitutions(subst3, subst4)
       applySubstToCtx(subst5, ctx) // in case we infer anything about the type variables
       if (node.alternate) {
         // Have to decide whether we want both branches to unify. Till then return in if wont work
-        const [, subst6] = infer(node.alternate, ctx)
-        return [tNamedUndef, composeSubsitutions(subst5, subst6)]
+        const [, subst6] = infer(node.alternate, ctx, copiedNode, 'alternate')
+        return saveTypeAndReturn([tNamedUndef, composeSubsitutions(subst5, subst6)], copiedNode)
       }
-      return [tNamedUndef, subst5]
+      return saveTypeAndReturn([tNamedUndef, subst5], copiedNode)
     }
     case 'ArrowFunctionExpression': {
       const newTypes: TYPE[] = []
@@ -311,13 +344,13 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
         const newType = newTypes[index]
         addToCtx(newCtx, param.name, newType)
       })
-      const [bodyType, subst] = infer(node.body, newCtx)
+      const [bodyType, subst] = infer(node.body, newCtx, copiedNode, 'body')
       const inferredType: FUNCTION = {
         nodeType: 'Function',
         fromTypes: applySubstToTypes(subst, newTypes),
         toType: bodyType
       }
-      return [inferredType, subst]
+      return saveTypeAndReturn([inferredType, subst], copiedNode)
     }
     case 'VariableDeclaration': {
       // forsee issues with recursive declarations
@@ -340,7 +373,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       const subst2 = unify(inferredInitType, applySubstToType(subst1, newType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredInitType))
-      return [tNamedUndef, composedSubst]
+      return saveTypeAndReturn([tNamedUndef, composedSubst], copiedNode)
     }
     case 'FunctionDeclaration': {
       const id = node.id
@@ -366,7 +399,7 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
         const newType = paramTypes[index]
         addToCtx(newCtx, param.name, newType)
       })
-      const [bodyType, subst1] = infer(node.body, newCtx)
+      const [bodyType, subst1] = infer(node.body, newCtx, copiedNode, 'body')
       // unify, for the same reason as in variable declaration
       const inferredType: FUNCTION = {
         nodeType: 'Function',
@@ -376,10 +409,10 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       const subst2 = unify(inferredType, applySubstToType(subst1, functionType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredType))
-      return [tNamedUndef, composedSubst]
+      return saveTypeAndReturn([tNamedUndef, composedSubst], copiedNode)
     }
     case 'CallExpression': {
-      const [funcType, subst1] = infer(node.callee, ctx)
+      const [funcType, subst1] = infer(node.callee, ctx, copiedNode, 'callee')
       const newCtx = cloneCtx(ctx)
       applySubstToCtx(subst1, newCtx)
       let subst2: Subsitution = {}
@@ -405,10 +438,10 @@ function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
       // consolidate new substitutions
       const finalSubst = composeSubsitutions(subst5, subst6)
       const inferredReturnType = applySubstToType(finalSubst, funcType1.toType)
-      return [inferredReturnType, finalSubst]
+      return saveTypeAndReturn([inferredReturnType, finalSubst], copiedNode)
     }
     default:
-      return [tNamedUndef, {}]
+      return saveTypeAndReturn([tNamedUndef, {}], copiedNode)
   }
 }
 

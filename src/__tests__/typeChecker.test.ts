@@ -10,6 +10,46 @@ function parse(code: any) {
   return program
 }
 
+describe('generated AST with annotated types', () => {
+  it('returns a valid AST for simple program', () => {
+    const program = parse('1 + 1;')
+    const expectedAST = [{
+      "expression": {
+        "type": "BinaryExpression",
+        "inferredType": { "kind": "primitive", "name": "number" },
+        "start": 0,
+        "end": 5,
+        "left": {
+          "type": "Literal",
+          "inferredType": { "kind": "primitive", "name": "number" },
+          "start": 0,
+          "end": 1,
+          "value": 1,
+          "raw": "1"
+        },
+        "operator": "+",
+        "right": {
+          "type": "Literal",
+          "inferredType": { "kind": "primitive", "name": "number" },
+          "start": 4,
+          "end": 5,
+          "value": 1,
+          "raw": "1"
+        },
+      },
+      "start": 0,
+      "end": 6,
+      "inferredType": {
+        "name": "undefined",
+        "kind": "primitive"
+      },
+      "type": "ExpressionStatement"
+    }]
+    const ast = typeCheck(program)
+    expect(ast).toEqual(expectedAST)
+  })
+})
+
 describe('type checking builtin functions', () => {
   it('no errors for well defined use of builtin functions', () => {
     /**
