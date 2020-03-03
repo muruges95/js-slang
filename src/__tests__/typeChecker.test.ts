@@ -11,40 +11,70 @@ function parse(code: any) {
 }
 
 describe('generated AST with annotated types', () => {
+
+  it('returns a valid AST for simple primitive operations', () => {
+    const code = 'const a = 5; const b = 4; const c = a + b; const d = c > 5;'
+    const program = parse(code)
+    const ast = typeCheck(program)
+
+    expect(ast).toHaveLength(4)
+    expect(ast[0].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
+    expect(ast[1].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
+    expect(ast[2].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
+    expect(ast[3].init.inferredType).toEqual({name: 'boolean', kind: 'primitive'})
+  })
+
+  it('returns valid AST for function declaration and application', () => {
+    const code = 'function foo(x) {return x + 5;} const y = foo(5);'
+    const program = parse(code)
+    const ast = typeCheck(program)
+    expect(ast).toHaveLength(2)
+    // the first node is not saving the function spec
+    expect(ast[0].id.inferredType).toEqual({
+      kind: 'function',
+      argumentTypes: [{name: 'number', kind: 'primitive'}],
+      resultType: {name: 'number', kind: 'primitive'}
+    })
+    expect(ast[1].init.type).toEqual('CallExpression')
+    expect(ast[1].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
+  })
+
   it('returns a valid AST for simple program', () => {
     const program = parse('1 + 1;')
-    const expectedAST = [{
-      "expression": {
-        "type": "BinaryExpression",
-        "inferredType": { "kind": "primitive", "name": "number" },
-        "start": 0,
-        "end": 5,
-        "left": {
-          "type": "Literal",
-          "inferredType": { "kind": "primitive", "name": "number" },
-          "start": 0,
-          "end": 1,
-          "value": 1,
-          "raw": "1"
+    const expectedAST = [
+      {
+        expression: {
+          type: 'BinaryExpression',
+          inferredType: { kind: 'primitive', name: 'number' },
+          start: 0,
+          end: 5,
+          left: {
+            type: 'Literal',
+            inferredType: { kind: 'primitive', name: 'number' },
+            start: 0,
+            end: 1,
+            value: 1,
+            raw: '1'
+          },
+          operator: '+',
+          right: {
+            type: 'Literal',
+            inferredType: { kind: 'primitive', name: 'number' },
+            start: 4,
+            end: 5,
+            value: 1,
+            raw: '1'
+          }
         },
-        "operator": "+",
-        "right": {
-          "type": "Literal",
-          "inferredType": { "kind": "primitive", "name": "number" },
-          "start": 4,
-          "end": 5,
-          "value": 1,
-          "raw": "1"
+        start: 0,
+        end: 6,
+        inferredType: {
+          name: 'undefined',
+          kind: 'primitive'
         },
-      },
-      "start": 0,
-      "end": 6,
-      "inferredType": {
-        "name": "undefined",
-        "kind": "primitive"
-      },
-      "type": "ExpressionStatement"
-    }]
+        type: 'ExpressionStatement'
+      }
+    ]
     const ast = typeCheck(program)
     expect(ast).toEqual(expectedAST)
   })

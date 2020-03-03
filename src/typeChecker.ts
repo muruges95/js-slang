@@ -198,21 +198,36 @@ interface FUNCTION {
 }
 type TYPE = NAMED | VAR | FUNCTION
 
-function saveTypeAndReturn(
-  inferred: [TYPE, Subsitution],
-  copiedNode: object
-): [TYPE, Subsitution] {
-  // TODO handle kind field
-  const type = inferred[0]
+function inferredTypeSpec(type: TYPE): object {
   switch (type.nodeType) {
     case 'Named':
-      copiedNode = { ...copiedNode, inferredType: { name: type.name, kind: 'primitive' } }
-      break
+      // all Named nodeTypes are primitive
+      return { name: type.name, kind: 'primitive'}
     case 'Function':
-      throw Error('saving types for functions not implemented yet')
+      const result = {
+        kind: 'function',
+        argumentTypes: type.fromTypes.map(arg => inferredTypeSpec(arg)),
+        resultType: inferredTypeSpec(type.toType)
+      }
+      return result
     case 'Var':
-      throw Error('there should not be Var node types in the AST')
+      return { kind: 'variable', name: type.name }
   }
+}
+
+/**
+ * saves inferred type to node.inferredType according to spec
+ * see: https://github.com/source-academy/js-slang/wiki/Type-Inference,-written-in-TypeScript
+ * @param inferred
+ * @param copiedNode
+ */
+function saveType(inferred: [TYPE, Subsitution], copiedNode: object): void {
+  const type = inferred[0]
+  copiedNode.inferredType = inferredTypeSpec(type)
+}
+
+function saveTypeAndReturn(inferred: [TYPE, Subsitution], copiedNode: object): [TYPE, Subsitution] {
+  saveType(inferred, copiedNode)
   return inferred
 }
 
@@ -366,7 +381,7 @@ function infer(
       // (i.e. perhaps in some kind of recursive definition)
       const newType = newTypeVar(ctx)
       addToCtx(ctx, id.name, newType)
-      const [inferredInitType, subst1] = infer(init, ctx)
+      const [inferredInitType, subst1] = infer(init, ctx, copiedNode, 'init')
       // In case we made a reference to our declared variable in our init, need to type
       // check the usage to see if the inferred init type is compatible with the inferred type of our
       // type variable based on the usage inside init
@@ -409,6 +424,13 @@ function infer(
       const subst2 = unify(inferredType, applySubstToType(subst1, functionType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredType))
+      /**
+       * NOTE the spec is not clear on how function declarations should be typed. For now I am just
+       * going to park the inferred of the function somewhere in the FunctionDeclaration for now
+       * Before returning, save function inferred type into the id child of FunctionDeclaration
+       * from that saved in the env.
+       */
+      saveType([env[id.name], {}], copiedNode.id)
       return saveTypeAndReturn([tNamedUndef, composedSubst], copiedNode)
     }
     case 'CallExpression': {
@@ -547,11 +569,16 @@ const primitiveFuncs = {
   // NOTE for now just handle for Number === Number
   '===': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
   '!==': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
+  '<': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
+  '<=': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
+  '>': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
+  '>=': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
   '+': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
   '-': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
   '*': tFunc(tNamedNumber, tNamedNumber, tNamedNumber)
   // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
+
 }
 
 const initialEnv = {
