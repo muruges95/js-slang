@@ -1,6 +1,5 @@
 import * as es from 'estree'
-// tslint:disable:no-console
-// tslint:disable: object-literal-key-quotes
+/* tslint:disable:object-literal-key-quotes no-console*/
 /**
  * An additional layer of typechecking to be done right after parsing.
  * @param program Parsed Program
@@ -223,7 +222,7 @@ function inferredTypeSpec(type: TYPE): object {
  */
 function saveType(inferred: [TYPE, Subsitution], copiedNode: object): void {
   const type = inferred[0]
-  copiedNode.inferredType = inferredTypeSpec(type)
+  copiedNode['inferredType'] = inferredTypeSpec(type) 
 }
 
 function saveTypeAndReturn(inferred: [TYPE, Subsitution], copiedNode: object): [TYPE, Subsitution] {
@@ -430,7 +429,7 @@ function infer(
        * Before returning, save function inferred type into the id child of FunctionDeclaration
        * from that saved in the env.
        */
-      saveType([env[id.name], {}], copiedNode.id)
+      saveType([env[id.name], {}], copiedNode['id'])
       return saveTypeAndReturn([tNamedUndef, composedSubst], copiedNode)
     }
     case 'CallExpression': {
