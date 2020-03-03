@@ -202,7 +202,7 @@ function inferredTypeSpec(type: TYPE): object {
   switch (type.nodeType) {
     case 'Named':
       // all Named nodeTypes are primitive
-      return { name: type.name, kind: 'primitive'}
+      return { name: type.name, kind: 'primitive' }
     case 'Function':
       const result = {
         kind: 'function',
@@ -578,7 +578,6 @@ const primitiveFuncs = {
   '-': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
   '*': tFunc(tNamedNumber, tNamedNumber, tNamedNumber)
   // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
-
 }
 
 const initialEnv = {

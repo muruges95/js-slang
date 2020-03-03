@@ -11,17 +11,16 @@ function parse(code: any) {
 }
 
 describe('generated AST with annotated types', () => {
-
   it('returns a valid AST for simple primitive operations', () => {
     const code = 'const a = 5; const b = 4; const c = a + b; const d = c > 5;'
     const program = parse(code)
     const ast = typeCheck(program)
 
     expect(ast).toHaveLength(4)
-    expect(ast[0].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
-    expect(ast[1].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
-    expect(ast[2].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
-    expect(ast[3].init.inferredType).toEqual({name: 'boolean', kind: 'primitive'})
+    expect(ast[0].init.inferredType).toEqual({ name: 'number', kind: 'primitive' })
+    expect(ast[1].init.inferredType).toEqual({ name: 'number', kind: 'primitive' })
+    expect(ast[2].init.inferredType).toEqual({ name: 'number', kind: 'primitive' })
+    expect(ast[3].init.inferredType).toEqual({ name: 'boolean', kind: 'primitive' })
   })
 
   it('returns valid AST for function declaration and application', () => {
@@ -32,11 +31,11 @@ describe('generated AST with annotated types', () => {
     // the first node is not saving the function spec
     expect(ast[0].id.inferredType).toEqual({
       kind: 'function',
-      argumentTypes: [{name: 'number', kind: 'primitive'}],
-      resultType: {name: 'number', kind: 'primitive'}
+      argumentTypes: [{ name: 'number', kind: 'primitive' }],
+      resultType: { name: 'number', kind: 'primitive' }
     })
     expect(ast[1].init.type).toEqual('CallExpression')
-    expect(ast[1].init.inferredType).toEqual({name: 'number', kind: 'primitive'})
+    expect(ast[1].init.inferredType).toEqual({ name: 'number', kind: 'primitive' })
   })
 
   it('returns a valid AST for simple program', () => {
