@@ -52,7 +52,7 @@ interface Subsitution {
 /** Union of free type variables */
 function union(a: Set<string>, b: Set<string>): Set<string> {
   const sum = new Set(a)
-  b.forEach((val) => {
+  b.forEach(val => {
     sum.add(val)
   })
   return sum
@@ -61,7 +61,7 @@ function union(a: Set<string>, b: Set<string>): Set<string> {
 /** Difference in free type variables. Contains a \ b */
 function difference(a: Set<string>, b: Set<string>): Set<string> {
   const diff = new Set(a)
-  b.forEach((value) => {
+  b.forEach(value => {
     diff.delete(value)
   })
   return diff
@@ -74,9 +74,12 @@ function freeTypeVarsInType(type: TYPE): Set<string> {
     case 'Var':
       return new Set<string>(type.name)
     case 'Function':
-      return union(type.fromTypes.reduce((acc, currentType) => {
-        return union(acc, freeTypeVarsInType(currentType))
-      }, new Set<string>()), freeTypeVarsInType(type.toType))
+      return union(
+        type.fromTypes.reduce((acc, currentType) => {
+          return union(acc, freeTypeVarsInType(currentType))
+        }, new Set<string>()),
+        freeTypeVarsInType(type.toType)
+      )
   }
 }
 
@@ -88,14 +91,17 @@ function freeTypeVarsInForAll(forAll: FORALL): Set<string> {
 
 function freeTypeVarsInEnv(env: Env): Set<string> {
   return Object.values(env).reduce((acc, currentType) => {
-    const freeVars = (currentType.nodeType === 'Forall') ? freeTypeVarsInForAll(currentType) : freeTypeVarsInType(currentType)
-    return union(acc, freeVars) 
+    const freeVars =
+      currentType.nodeType === 'Forall'
+        ? freeTypeVarsInForAll(currentType)
+        : freeTypeVarsInType(currentType)
+    return union(acc, freeVars)
   }, new Set<string>())
 }
 
 function instantiate(ctx: Ctx, forAll: FORALL): TYPE {
   const subst: Subsitution = {}
-  forAll.quantifiers.forEach((name) => {
+  forAll.quantifiers.forEach(name => {
     const typeVar = newTypeVar(ctx)
     subst[name] = typeVar
   })
@@ -110,7 +116,7 @@ function generalize(env: Env, type: TYPE): TYPE | FORALL {
   if (quantifiersToBeAdded.length > 0) {
     return tForAll(quantifiersToBeAdded, type)
   }
-  return type;
+  return type
 }
 
 function contains(type: TYPE, name: string): boolean {
@@ -159,7 +165,13 @@ function unify(t1: TYPE, t2: TYPE): Subsitution {
     }
     let argSubst: Subsitution = {}
     for (let i = 0; i < t1.fromTypes.length; i++) {
-      argSubst = composeSubsitutions(argSubst, unify(applySubstToType(argSubst, t1.fromTypes[i]), applySubstToType(argSubst, t2.fromTypes[i])))
+      argSubst = composeSubsitutions(
+        argSubst,
+        unify(
+          applySubstToType(argSubst, t1.fromTypes[i]),
+          applySubstToType(argSubst, t2.fromTypes[i])
+        )
+      )
     }
     const bodySubst = unify(
       applySubstToType(argSubst, t1.toType),
@@ -193,7 +205,7 @@ function applySubstToType(subst: Subsitution, type: TYPE): TYPE {
 
 function applySubstToForAll(subst: Subsitution, forAll: FORALL): FORALL {
   const unboundSubst = { ...subst }
-  forAll.quantifiers.forEach((quantifier) => {
+  forAll.quantifiers.forEach(quantifier => {
     delete unboundSubst[quantifier]
   })
   return {
@@ -240,7 +252,7 @@ function cloneCtx(ctx: Ctx): Ctx {
 function applySubstToCtx(subst: Subsitution, ctx: Ctx): void {
   Object.keys(ctx.env).forEach(name => {
     const entry = ctx.env[name]
-    if (entry.nodeType === "Forall") {
+    if (entry.nodeType === 'Forall') {
       ctx.env[name] = applySubstToForAll(subst, entry)
     } else {
       ctx.env[name] = applySubstToType(subst, entry)
