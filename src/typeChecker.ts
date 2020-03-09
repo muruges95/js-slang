@@ -1,5 +1,5 @@
 import * as es from 'estree'
-/* tslint:disable:object-literal-key-quotes no-console*/
+/* tslint:disable:object-literal-key-quotes no-console no-string-literal*/
 /**
  * An additional layer of typechecking to be done right after parsing.
  * @param program Parsed Program
@@ -180,7 +180,7 @@ function newTypeVar(ctx: Ctx): VAR {
   }
 }
 
-type NAMED_TYPE = 'boolean' | 'number' | 'string' | 'null' | 'undefined'
+type NAMED_TYPE = 'boolean' | 'number' | 'string' | 'null' | 'undefined' | 'integer'
 
 interface NAMED {
   nodeType: 'Named'
@@ -222,7 +222,7 @@ function inferredTypeSpec(type: TYPE): object {
  */
 function saveType(inferred: [TYPE, Subsitution], copiedNode: object): void {
   const type = inferred[0]
-  copiedNode['inferredType'] = inferredTypeSpec(type) 
+  copiedNode['inferredType'] = inferredTypeSpec(type)
 }
 
 function saveTypeAndReturn(inferred: [TYPE, Subsitution], copiedNode: object): [TYPE, Subsitution] {
@@ -248,14 +248,11 @@ function infer(
       const [inferredType, subst1] = infer(node.argument, ctx, copiedNode, 'argument')
       const funcType = env[node.operator] as FUNCTION
       const newType = newTypeVar(ctx)
-      const subst2 = unify(
-        {
-          nodeType: 'Function',
-          fromTypes: [inferredType],
-          toType: newType
-        },
-        funcType
-      )
+      const subst2 = unify(funcType, {
+        nodeType: 'Function',
+        fromTypes: [inferredType],
+        toType: newType
+      })
       const composedSubst = composeSubsitutions(subst1, subst2)
       return saveTypeAndReturn(
         [applySubstToType(composedSubst, funcType.toType), composedSubst],
@@ -265,19 +262,17 @@ function infer(
     case 'LogicalExpression': // both cases are the same
     case 'BinaryExpression': {
       const [inferredLeft, leftSubst] = infer(node.left, ctx, copiedNode, 'left')
-      const [inferredRight, rightSubst] = infer(node.right, ctx, copiedNode, 'right')
+      const newCtx = cloneCtx(ctx)
+      applySubstToCtx(leftSubst, newCtx)
+      const [inferredRight, rightSubst] = infer(node.right, newCtx, copiedNode, 'right')
       let composedSubst = composeSubsitutions(leftSubst, rightSubst)
-
       const funcType = env[node.operator] as FUNCTION
       const newType = newTypeVar(ctx)
-      const subst1 = unify(
-        {
-          nodeType: 'Function',
-          fromTypes: [inferredLeft, inferredRight],
-          toType: newType
-        },
-        funcType
-      )
+      const subst1 = unify(funcType, {
+        nodeType: 'Function',
+        fromTypes: [inferredLeft, inferredRight],
+        toType: newType
+      })
       composedSubst = composeSubsitutions(subst1, composedSubst)
       const inferredReturnType = applySubstToType(composedSubst, funcType.toType)
       return saveTypeAndReturn([inferredReturnType, composedSubst], copiedNode)
@@ -313,6 +308,8 @@ function infer(
       const typeOfLiteral = typeof literalVal
       if (literalVal === null) {
         return saveTypeAndReturn([tNamedNull, {}], copiedNode)
+      } else if (typeof literalVal === 'number' && Math.round(literalVal) === literalVal) {
+        return saveTypeAndReturn([tNamedInt, {}], copiedNode)
       } else if (
         typeOfLiteral === 'boolean' ||
         typeOfLiteral === 'string' ||
@@ -489,6 +486,7 @@ const tNamedNumber = tNamed('number')
 const tNamedNull = tNamed('null')
 const tNamedString = tNamed('string')
 const tNamedUndef = tNamed('undefined')
+const tNamedInt = tNamed('integer')
 
 function tFunc(...types: TYPE[]): FUNCTION {
   const fromTypes = types.slice(0, -1)
@@ -505,6 +503,13 @@ const predeclaredNames = {
   Infinity: tNamedNumber,
   NaN: tNamedNumber,
   undefined: tNamedUndef,
+  math_LN2: tNamedNumber,
+  math_LN10: tNamedNumber,
+  math_LOG2E: tNamedNumber,
+  math_LOG10E: tNamedNumber,
+  math_PI: tNamedNumber,
+  math_SQRT1_2: tNamedNumber,
+  math_SQRT2: tNamedNumber,
   // is something functions
   is_boolean: tFunc(tVar('any'), tNamedBool),
   is_function: tFunc(tVar('any'), tNamedBool),
@@ -531,17 +536,12 @@ const predeclaredNames = {
   math_fround: tFunc(tNamedNumber, tNamedNumber),
   math_hypot: tFunc(tNamedNumber, tNamedNumber),
   math_imul: tFunc(tNamedNumber, tNamedNumber),
-  math_LN2: tFunc(tNamedNumber, tNamedNumber),
-  math_LN10: tFunc(tNamedNumber, tNamedNumber),
   math_log: tFunc(tNamedNumber, tNamedNumber),
   math_log1p: tFunc(tNamedNumber, tNamedNumber),
   math_log2: tFunc(tNamedNumber, tNamedNumber),
-  math_LOG2E: tFunc(tNamedNumber, tNamedNumber),
   math_log10: tFunc(tNamedNumber, tNamedNumber),
-  math_LOG10E: tFunc(tNamedNumber, tNamedNumber),
   math_max: tFunc(tNamedNumber, tNamedNumber),
   math_min: tFunc(tNamedNumber, tNamedNumber),
-  math_PI: tFunc(tNamedNumber, tNamedNumber),
   math_pow: tFunc(tNamedNumber, tNamedNumber),
   math_random: tFunc(tNamedNumber, tNamedNumber),
   math_round: tFunc(tNamedNumber, tNamedNumber),
@@ -549,13 +549,11 @@ const predeclaredNames = {
   math_sin: tFunc(tNamedNumber, tNamedNumber),
   math_sinh: tFunc(tNamedNumber, tNamedNumber),
   math_sqrt: tFunc(tNamedNumber, tNamedNumber),
-  math_SQRT1_2: tFunc(tNamedNumber, tNamedNumber),
-  math_SQRT2: tFunc(tNamedNumber, tNamedNumber),
   math_tan: tFunc(tNamedNumber, tNamedNumber),
   math_tanh: tFunc(tNamedNumber, tNamedNumber),
   math_trunc: tFunc(tNamedNumber, tNamedNumber),
   // misc functions
-  parse_int: tFunc(tNamedString, tNamedNumber),
+  parse_int: tFunc(tNamedString, tNamedInt, tNamedNumber),
   prompt: tFunc(tNamedString, tNamedString),
   runtime: tFunc(tNamedNumber),
   stringify: tFunc(tVar('any'), tNamedString)

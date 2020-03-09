@@ -1,4 +1,4 @@
-/* tslint:disable:object-literal-key-quotes */
+/* tslint:disable:object-literal-key-quotes no-string-literal */
 // import { typeCheck } from '../typeChecker'
 import { createContext } from '../index'
 import { parse as __parse } from '../parser'
