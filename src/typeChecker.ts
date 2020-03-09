@@ -18,6 +18,7 @@ export function typeCheck(program: es.Program | undefined): object[] {
       program.body.forEach((node, idx) => {
         infer(node, ctx, root, idx.toString())
       })
+      // console.log(ctx.env)
     }
     return Object.keys(root).map(key => root[key])
   } catch (e) {
@@ -30,7 +31,7 @@ export function typeCheck(program: es.Program | undefined): object[] {
 // An environment maps variables (which are expressions) to types. Do not confuse with a
 // substitution which maps type variables to types
 interface Env {
-  [name: string]: TYPE
+  [name: string]: TYPE | FORALL
 }
 
 /**
@@ -46,6 +47,70 @@ interface Ctx {
 // expressions) to types
 interface Subsitution {
   [key: string]: TYPE
+}
+
+/** Union of free type variables */
+function union(a: Set<string>, b: Set<string>): Set<string> {
+  const sum = new Set(a)
+  b.forEach((val) => {
+    sum.add(val)
+  })
+  return sum
+}
+
+/** Difference in free type variables. Contains a \ b */
+function difference(a: Set<string>, b: Set<string>): Set<string> {
+  const diff = new Set(a)
+  b.forEach((value) => {
+    diff.delete(value)
+  })
+  return diff
+}
+
+function freeTypeVarsInType(type: TYPE): Set<string> {
+  switch (type.nodeType) {
+    case 'Named':
+      return new Set<string>()
+    case 'Var':
+      return new Set<string>(type.name)
+    case 'Function':
+      return union(type.fromTypes.reduce((acc, currentType) => {
+        return union(acc, freeTypeVarsInType(currentType))
+      }, new Set<string>()), freeTypeVarsInType(type.toType))
+  }
+}
+
+function freeTypeVarsInForAll(forAll: FORALL): Set<string> {
+  const boundVars = new Set<string>(forAll.quantifiers)
+  const freeInType = freeTypeVarsInType(forAll.type)
+  return difference(freeInType, boundVars)
+}
+
+function freeTypeVarsInEnv(env: Env): Set<string> {
+  return Object.values(env).reduce((acc, currentType) => {
+    const freeVars = (currentType.nodeType === 'Forall') ? freeTypeVarsInForAll(currentType) : freeTypeVarsInType(currentType)
+    return union(acc, freeVars) 
+  }, new Set<string>())
+}
+
+function instantiate(ctx: Ctx, forAll: FORALL): TYPE {
+  const subst: Subsitution = {}
+  forAll.quantifiers.forEach((name) => {
+    const typeVar = newTypeVar(ctx)
+    subst[name] = typeVar
+  })
+  return applySubstToType(subst, forAll.type)
+}
+
+/** Generalize as much as possible */
+function generalize(env: Env, type: TYPE): TYPE | FORALL {
+  const envFreeVars = freeTypeVarsInEnv(env)
+  const typeFreeVars = freeTypeVarsInType(type)
+  const quantifiersToBeAdded = Object.keys(difference(typeFreeVars, envFreeVars))
+  if (quantifiersToBeAdded.length > 0) {
+    return tForAll(quantifiersToBeAdded, type)
+  }
+  return type;
 }
 
 function contains(type: TYPE, name: string): boolean {
@@ -94,7 +159,7 @@ function unify(t1: TYPE, t2: TYPE): Subsitution {
     }
     let argSubst: Subsitution = {}
     for (let i = 0; i < t1.fromTypes.length; i++) {
-      argSubst = composeSubsitutions(argSubst, unify(t1.fromTypes[i], t2.fromTypes[i]))
+      argSubst = composeSubsitutions(argSubst, unify(applySubstToType(argSubst, t1.fromTypes[i]), applySubstToType(argSubst, t2.fromTypes[i])))
     }
     const bodySubst = unify(
       applySubstToType(argSubst, t1.toType),
@@ -103,7 +168,7 @@ function unify(t1: TYPE, t2: TYPE): Subsitution {
     return composeSubsitutions(argSubst, bodySubst)
   } else {
     // Mismatch
-    throw Error(`Type Mismatch. Expected ${JSON.stringify(t1)}, instead got ${JSON.stringify(t2)}`)
+    throw Error(`Types do not unify: ${JSON.stringify(t1)} vs ${JSON.stringify(t2)}`)
   }
 }
 
@@ -123,6 +188,17 @@ function applySubstToType(subst: Subsitution, type: TYPE): TYPE {
         fromTypes: applySubstToTypes(subst, type.fromTypes),
         toType: applySubstToType(subst, type.toType)
       }
+  }
+}
+
+function applySubstToForAll(subst: Subsitution, forAll: FORALL): FORALL {
+  const unboundSubst = { ...subst }
+  forAll.quantifiers.forEach((quantifier) => {
+    delete unboundSubst[quantifier]
+  })
+  return {
+    ...forAll,
+    type: applySubstToType(unboundSubst, forAll.type)
   }
 }
 
@@ -163,11 +239,16 @@ function cloneCtx(ctx: Ctx): Ctx {
 
 function applySubstToCtx(subst: Subsitution, ctx: Ctx): void {
   Object.keys(ctx.env).forEach(name => {
-    ctx.env[name] = applySubstToType(subst, ctx.env[name])
+    const entry = ctx.env[name]
+    if (entry.nodeType === "Forall") {
+      ctx.env[name] = applySubstToForAll(subst, entry)
+    } else {
+      ctx.env[name] = applySubstToType(subst, entry)
+    }
   })
 }
 
-function addToCtx(ctx: Ctx, name: string, type: TYPE): void {
+function addToCtx(ctx: Ctx, name: string, type: TYPE | FORALL): void {
   ctx.env[name] = type
 }
 
@@ -195,9 +276,18 @@ interface FUNCTION {
   fromTypes: TYPE[]
   toType: TYPE
 }
+
+/** Polytype */
+interface FORALL {
+  nodeType: 'Forall'
+  quantifiers: string[]
+  type: TYPE
+}
+
+/** Monotypes */
 type TYPE = NAMED | VAR | FUNCTION
 
-function inferredTypeSpec(type: TYPE): object {
+function inferredTypeSpec(type: TYPE | FORALL): object {
   switch (type.nodeType) {
     case 'Named':
       // all Named nodeTypes are primitive
@@ -211,6 +301,8 @@ function inferredTypeSpec(type: TYPE): object {
       return result
     case 'Var':
       return { kind: 'variable', name: type.name }
+    case 'Forall':
+      return inferredTypeSpec(type.type) // might wanna show quantifiers
   }
 }
 
@@ -220,7 +312,7 @@ function inferredTypeSpec(type: TYPE): object {
  * @param inferred
  * @param copiedNode
  */
-function saveType(inferred: [TYPE, Subsitution], copiedNode: object): void {
+function saveType(inferred: [TYPE | FORALL, Subsitution], copiedNode: object): void {
   const type = inferred[0]
   copiedNode['inferredType'] = inferredTypeSpec(type)
 }
@@ -266,7 +358,13 @@ function infer(
       applySubstToCtx(leftSubst, newCtx)
       const [inferredRight, rightSubst] = infer(node.right, newCtx, copiedNode, 'right')
       let composedSubst = composeSubsitutions(leftSubst, rightSubst)
-      const funcType = env[node.operator] as FUNCTION
+      const lookupType = env[node.operator] as FUNCTION | FORALL
+      let funcType: FUNCTION
+      if (lookupType.nodeType === 'Forall') {
+        funcType = instantiate(ctx, lookupType) as FUNCTION
+      } else {
+        funcType = lookupType
+      }
       const newType = newTypeVar(ctx)
       const subst1 = unify(funcType, {
         nodeType: 'Function',
@@ -322,7 +420,12 @@ function infer(
     case 'Identifier': {
       const identifierName = node.name
       if (env[identifierName]) {
-        return saveTypeAndReturn([env[identifierName], {}], copiedNode)
+        const envType = env[identifierName]
+        if (envType.nodeType === 'Forall') {
+          return saveTypeAndReturn([instantiate(ctx, envType), {}], copiedNode)
+        } else {
+          return saveTypeAndReturn([envType, {}], copiedNode)
+        }
       }
       throw Error(`Undefined identifier: ${identifierName}`)
     }
@@ -378,6 +481,7 @@ function infer(
       const newType = newTypeVar(ctx)
       addToCtx(ctx, id.name, newType)
       const [inferredInitType, subst1] = infer(init, ctx, copiedNode, 'init')
+      generalize(ctx.env, inferredInitType) // REDUNDANT CALL
       // In case we made a reference to our declared variable in our init, need to type
       // check the usage to see if the inferred init type is compatible with the inferred type of our
       // type variable based on the usage inside init
@@ -481,6 +585,14 @@ function tVar(name: string): VAR {
   }
 }
 
+function tForAll(quantifiers: string[], type: TYPE): FORALL {
+  return {
+    nodeType: 'Forall',
+    quantifiers,
+    type
+  }
+}
+
 const tNamedBool = tNamed('boolean')
 const tNamedNumber = tNamed('number')
 const tNamedNull = tNamed('null')
@@ -571,7 +683,7 @@ const primitiveFuncs = {
   '>': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
   '>=': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
-  '+': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
+  '+': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tVar('A'))),
   '-': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
   '*': tFunc(tNamedNumber, tNamedNumber, tNamedNumber)
   // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
