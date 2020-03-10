@@ -243,7 +243,7 @@ describe('binary expressions', () => {
   })
 
   it.skip('no errors when adding int with number', () => {
-    const code = "const x = 1.5; const y = 1; const z = x + y;"
+    const code = 'const x = 1.5; const y = 1; const z = x + y;'
     const program = parse(code)
     expect(() => typeCheck(program)).not.toThrowError()
   })
