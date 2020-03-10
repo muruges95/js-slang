@@ -190,7 +190,7 @@ function applySubstToType(subst: Subsitution, type: TYPE): TYPE {
       return type
     case 'Var':
       if (subst[type.name]) {
-        return subst[type.name]
+        return applySubstToType(subst, subst[type.name])
       } else {
         return type
       }
@@ -369,7 +369,7 @@ function infer(
       const newCtx = cloneCtx(ctx)
       applySubstToCtx(leftSubst, newCtx)
       const [inferredRight, rightSubst] = infer(node.right, newCtx, copiedNode, 'right')
-      let composedSubst = composeSubsitutions(leftSubst, rightSubst)
+      let composedSubst = composeSubsitutions(rightSubst, leftSubst)
       const lookupType = env[node.operator] as FUNCTION | FORALL
       let funcType: FUNCTION
       if (lookupType.nodeType === 'Forall') {
@@ -380,11 +380,13 @@ function infer(
       const newType = newTypeVar(ctx)
       const subst1 = unify(funcType, {
         nodeType: 'Function',
-        fromTypes: [inferredLeft, inferredRight],
+        fromTypes: [applySubstToType(composedSubst, inferredLeft), inferredRight],
         toType: newType
       })
       composedSubst = composeSubsitutions(subst1, composedSubst)
-      const inferredReturnType = applySubstToType(composedSubst, funcType.toType)
+      // console.log(composedSubst)
+      const inferredReturnType = applySubstToType(subst1, newType)
+      // console.log(inferredReturnType)
       return saveTypeAndReturn([inferredReturnType, composedSubst], copiedNode)
     }
     case 'ExpressionStatement': {
@@ -635,11 +637,11 @@ const predeclaredNames = {
   math_SQRT1_2: tNamedNumber,
   math_SQRT2: tNamedNumber,
   // is something functions
-  is_boolean: tFunc(tVar('any'), tNamedBool),
-  is_function: tFunc(tVar('any'), tNamedBool),
-  is_number: tFunc(tVar('any'), tNamedBool),
-  is_string: tFunc(tVar('any'), tNamedBool),
-  is_undefined: tFunc(tVar('any'), tNamedBool),
+  is_boolean: tForAll(['A'], tFunc(tVar('A'), tNamedBool)),
+  is_function: tForAll(['A'], tFunc(tVar('A'), tNamedBool)),
+  is_number: tForAll(['A'], tFunc(tVar('A'), tNamedBool)),
+  is_string: tForAll(['A'], tFunc(tVar('A'), tNamedBool)),
+  is_undefined: tForAll(['A'], tFunc(tVar('A'), tNamedBool)),
   // math functions
   math_abs: tFunc(tNamedNumber, tNamedNumber),
   math_acos: tFunc(tNamedNumber, tNamedNumber),
@@ -677,9 +679,9 @@ const predeclaredNames = {
   math_tanh: tFunc(tNamedNumber, tNamedNumber),
   math_trunc: tFunc(tNamedNumber, tNamedNumber),
   // misc functions
-  parse_int: tFunc(tNamedString, tNamedInt, tNamedNumber),
+  parse_int: tFunc(tNamedString, tNamedInt, tNamedInt),
   prompt: tFunc(tNamedString, tNamedString),
-  runtime: tFunc(tNamedNumber),
+  runtime: tFunc(tNamedInt),
   stringify: tFunc(tVar('any'), tNamedString)
 }
 
@@ -688,16 +690,16 @@ const primitiveFuncs = {
   '&&': tFunc(tNamedBool, tNamedBool, tNamedBool),
   '||': tFunc(tNamedBool, tNamedBool, tNamedBool),
   // NOTE for now just handle for Number === Number
-  '===': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
-  '!==': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
-  '<': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
-  '<=': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
-  '>': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
-  '>=': tFunc(tNamedNumber, tNamedNumber, tNamedBool),
+  '===': tForAll(['A', 'B'], tFunc(tVar('A'), tVar('B'), tNamedBool)),
+  '!==': tForAll(['A', 'B'], tFunc(tVar('A'), tVar('B'), tNamedBool)),
+  '<': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tNamedBool)),
+  '<=': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tNamedBool)),
+  '>': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tNamedBool)),
+  '>=': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tNamedBool)),
   // "Bool==": tFunc(tNamedBool(), tNamedBool(), tNamedBool()),
   '+': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tVar('A'))),
-  '-': tFunc(tNamedNumber, tNamedNumber, tNamedNumber),
-  '*': tFunc(tNamedNumber, tNamedNumber, tNamedNumber)
+  '-': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tVar('A'))),
+  '*': tForAll(['A'], tFunc(tVar('A'), tVar('A'), tVar('A')))
   // '/': tFunc(tNamedNumber(), tNamedNumber(), tNamedNumber())
 }
 
