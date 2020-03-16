@@ -15,6 +15,10 @@ export function typeCheck(program: es.Program | undefined): void {
     // like lists etc.
     if (program.body.length < 10) {
       program.body.forEach(node => {
+        traverse(node)
+        preprocessDeclaration(node, ctx)
+      })
+      program.body.forEach(node => {
         infer(node, ctx)
       })
       // console.log(ctx.env)
@@ -22,6 +26,102 @@ export function typeCheck(program: es.Program | undefined): void {
   } catch (e) {
     console.log(e)
     throw e
+  }
+}
+
+let typeIdCounter = 0
+/**
+ * Traverse node and add `type_id` attr to it. This id will be used to recover inferred node types
+ * after finishing type checking
+ * @param node
+ */
+function traverse(node: es.Node) {
+  // @ts-ignore
+  node.typeId = typeIdCounter
+  typeIdCounter++
+  switch (node.type) {
+    case 'UnaryExpression': {
+      traverse(node.argument)
+      break
+    }
+    case 'LogicalExpression': // both cases are the same
+    case 'BinaryExpression': {
+      traverse(node.left)
+      traverse(node.right)
+      break
+    }
+    case 'ExpressionStatement': {
+      traverse(node.expression)
+      break
+    }
+    case 'BlockStatement': {
+      for (const currentNode of node.body) {
+        traverse(currentNode)
+      }
+      break
+    }
+    case 'ConditionalExpression': // both cases are the same
+    case 'IfStatement': {
+      traverse(node.test)
+      traverse(node.consequent)
+      if (node.alternate) {
+        traverse(node.alternate)
+      }
+      break
+    }
+    case 'CallExpression': {
+      traverse(node.callee)
+      node.arguments.forEach(arg => {
+        traverse(arg)
+      })
+      break
+    }
+    case 'ReturnStatement':
+    case 'Literal':
+    case 'Identifier':
+    case 'ArrowFunctionExpression':
+    case 'VariableDeclaration':
+    case 'FunctionDeclaration':
+    default:
+      return
+  }
+}
+
+function preprocessDeclaration(node: es.Node, ctx: Ctx) {
+  switch (node.type) {
+    case 'VariableDeclaration': {
+      const declarator = node.declarations[0] // exactly 1 declaration allowed per line
+      const init = declarator.init
+      const id = declarator.id
+      if (!init || id.type !== 'Identifier') {
+        throw Error('Either no initialization or not an identifier on LHS')
+      }
+      // get a reference to the type variable representing our new variable
+      // this is so we know of any references made to our variable in the init
+      // (i.e. perhaps in some kind of recursive definition)
+      const newType = newTypeVar(ctx)
+      addToCtx(ctx, id.name, newType)
+      break
+    }
+    case 'FunctionDeclaration': {
+      const id = node.id
+      if (id === null) {
+        throw Error('No identifier for function declaration')
+      }
+      const paramTypes: TYPE[] = []
+      node.params.forEach(() => {
+        const newType = newTypeVar(ctx)
+        paramTypes.push(newType)
+      })
+      // similar to variable declaration, catch possible type errors such as wrongly using identifier
+      // not as a function. for that we need to create a type variable and introduce it into the context
+      const functionType: FUNCTION = {
+        nodeType: 'Function',
+        fromTypes: paramTypes,
+        toType: newTypeVar(ctx)
+      }
+      addToCtx(ctx, id.name, functionType)
+    }
   }
 }
 
@@ -298,10 +398,8 @@ interface FORALL {
 type TYPE = NAMED | VAR | FUNCTION
 
 // tslint:disable-next-line: cyclomatic-complexity
-function infer(
-  node: es.Node,
-  ctx: Ctx,
-): [TYPE, Subsitution] {
+function infer(node: es.Node, ctx: Ctx): [TYPE, Subsitution] {
+  // debugger
   const env = ctx.env
   switch (node.type) {
     case 'UnaryExpression': {
@@ -357,6 +455,10 @@ function infer(
     case 'BlockStatement': {
       const newCtx = cloneCtx(ctx) // create new scope
       let composedSubst: Subsitution = {}
+
+      // preprocess by adding declarations to the ctx
+      node.body.forEach(n => preprocessDeclaration(n, newCtx))
+
       for (const currentNode of node.body) {
         // block statement, do not need to generate intermediate annotated AST
         const [inferredType, subst] = infer(currentNode, newCtx)
@@ -438,21 +540,25 @@ function infer(
       // assuming constant declaration for now (check the 'kind' field)
       const declarator = node.declarations[0] // exactly 1 declaration allowed per line
       const init = declarator.init
+
+      // moved to preprocessDeclaration
       const id = declarator.id
       if (!init || id.type !== 'Identifier') {
         throw Error('Either no initialization or not an identifier on LHS')
       }
-      // get a reference to the type variable representing our new variable
-      // this is so we know of any references made to our variable in the init
-      // (i.e. perhaps in some kind of recursive definition)
-      const newType = newTypeVar(ctx)
-      addToCtx(ctx, id.name, newType)
+      // // get a reference to the type variable representing our new variable
+      // // this is so we know of any references made to our variable in the init
+      // // (i.e. perhaps in some kind of recursive definition)
+      // const newType = newTypeVar(ctx)
+      // addToCtx(ctx, id.name, newType)
+
       const [inferredInitType, subst1] = infer(init, ctx)
       generalize(ctx.env, inferredInitType) // REDUNDANT CALL
       // In case we made a reference to our declared variable in our init, need to type
       // check the usage to see if the inferred init type is compatible with the inferred type of our
       // type variable based on the usage inside init
-      const subst2 = unify(inferredInitType, applySubstToType(subst1, newType))
+      const varType = ctx.env[id.name] as VAR
+      const subst2 = unify(inferredInitType, applySubstToType(subst1, varType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredInitType))
       return [tNamedUndef, composedSubst]
@@ -462,33 +568,36 @@ function infer(
       if (id === null) {
         throw Error('No identifier for function declaration')
       }
-      const paramTypes: TYPE[] = []
-      node.params.forEach(() => {
-        const newType = newTypeVar(ctx)
-        paramTypes.push(newType)
-      })
-      // similar to variable declaration, catch possible type errors such as wrongly using identifier
-      // not as a function. for that we need to create a type variable and introduce it into the context
-      const functionType: FUNCTION = {
-        nodeType: 'Function',
-        fromTypes: paramTypes,
-        toType: newTypeVar(ctx)
-      }
-      addToCtx(ctx, id.name, functionType)
+      // const paramTypes: TYPE[] = []
+      // node.params.forEach(() => {
+      //   const newType = newTypeVar(ctx)
+      //   paramTypes.push(newType)
+      // })
+      // // similar to variable declaration, catch possible type errors such as wrongly using identifier
+      // // not as a function. for that we need to create a type variable and introduce it into the context
+      // const functionType: FUNCTION = {
+      //   nodeType: 'Function',
+      //   fromTypes: paramTypes,
+      //   toType: newTypeVar(ctx)
+      // }
+      // addToCtx(ctx, id.name, functionType)
       // clone scope only after we have accounted for all the new type variables to be created
+      const funcType = ctx.env[id.name] as FUNCTION
       const newCtx = cloneCtx(ctx)
       node.params.forEach((param: es.Identifier, index) => {
-        const newType = paramTypes[index]
+        const newType = funcType.fromTypes[index]
         addToCtx(newCtx, param.name, newType)
       })
       const [bodyType, subst1] = infer(node.body, newCtx)
       // unify, for the same reason as in variable declaration
       const inferredType: FUNCTION = {
         nodeType: 'Function',
-        fromTypes: applySubstToTypes(subst1, paramTypes),
+        fromTypes: applySubstToTypes(subst1, funcType.fromTypes),
         toType: bodyType
       }
-      const subst2 = unify(inferredType, applySubstToType(subst1, functionType))
+      console.log('inferredType for function')
+      console.log(inferredType)
+      const subst2 = unify(inferredType, applySubstToType(subst1, funcType))
       const composedSubst = composeSubsitutions(subst1, subst2)
       addToCtx(ctx, id.name, applySubstToType(composedSubst, inferredType))
       return [tNamedUndef, composedSubst]
